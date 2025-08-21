@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digitale Schadestaat - Van Dort Letselschade</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .bg-primary { background-color: #0E3190; }
+        .text-primary { color: #0E3190; }
+        .border-primary { border-color: #0E3190; }
+        .hover\\:bg-primary-dark:hover { background-color: #0A246A; }
+        .bg-accent { background-color: #19AACD; }
+        .text-accent { color: #19AACD; }
+        .bg-sidebar { background-color: #f0f4f9; }
+        .bg-subtle { background-color: #F8FBFC; }
+        .border-validation-error { border-color: #E53E3E; }
+        .border-validation-warning { border-color: #F6AD55; }
+        .drag-handle { cursor: move; }
+        .sortable-ghost { opacity: 0.4; background-color: #A4DFEB; }
+        .schadepost-hoofd { border-bottom: 2px solid #e5e7eb; padding-bottom: 1rem; }
+        .sub-regel { background-color: #f9fafb; border-left: 3px solid #19AACD; }
+        
+        /* Validatie stijlen */
+        .validation-panel { background: linear-gradient(135deg, #FED7D7 0%, #FEE2E2 100%); }
+        .validation-item { background: rgba(255,255,255,0.7); }
+        .validation-error { color: #E53E3E; }
+        .validation-warning { color: #D69E2E; }
+        .validation-info { color: #3182CE; }
+        
+        /* Modal stijlen */
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 50; }
+        .modal-content { background: white; padding: 2rem; border-radius: 0.5rem; text-align: center; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
+        
+        .print-only { display: none; }
+        @media print {
+            body > *:not(.print-only) { display: none; }
+            .print-only { display: block; position: absolute; left: 0; top: 0; width: 100%; }
+            #print-output h1 { font-size: 2rem; font-weight: bold; color: #0E3190; }
+            #print-output h2 { font-size: 1.5rem; font-weight: bold; margin-top: 1.5rem; border-bottom: 1px solid #ccc; padding-bottom: 0.5rem; }
+            #print-output table { width: 100%; border-collapse: collapse; margin-top: 1rem; table-layout: fixed; }
+            #print-output th, #print-output td { border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; }
+            #print-output th { background-color: #f2f2f2; }
+            .print-hoofd-regel { font-weight: bold; background-color: #f9f9f9; }
+            .print-sub-regel td { border-top: 1px solid #eee; }
+            .print-toelichting-rij td { padding-left: 20px; font-style: italic; color: #555; background-color: #fafafa; border-bottom: 1px solid #ddd; }
+        }
+
+        /* Responsieve verbeteringen */
+        @media (max-width: 1024px) {
+            .lg\\:flex-row { flex-direction: column; }
+            .lg\\:w-2\\/3, .lg\\:w-1\\/3 { width: 100%; }
+            .sticky { position: relative; }
+        }
+        
+        @media (max-width: 768px) {
+            .md\\:grid-cols-12 { grid-template-columns: 1fr; }
+            .md\\:col-span-3, .md\\:col-span-4, .md\\:col-span-5, .md\\:col-span-10, .md\\:col-span-2 { grid-column: span 1; }
+            .flex-wrap { flex-wrap: wrap; }
+            .gap-4 { gap: 0.75rem; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div class="flex flex-col lg:flex-row min-h-screen">
+        <main class="w-full lg:w-2/3 p-4 sm:p-6 lg:p-8">
+            <header class="mb-8">
+                <h1 class="text-3xl font-bold text-primary">Digitale Schadestaat</h1>
+                <p class="text-lg text-gray-600">Van Dort Letselschade</p>
+            </header>
+
+            <!-- Validatie Dashboard -->
+            <section id="validation-dashboard" class="validation-panel p-4 rounded-lg shadow-md mb-6 hidden">
+                <h3 class="text-lg font-semibold mb-3 text-red-800">⚠️ Validatie Waarschuwingen</h3>
+                <div id="validation-items" class="space-y-2"></div>
+            </section>
+
+            <section class="bg-white p-6 rounded-lg shadow-md">
+                <div class="flex justify-between items-center mb-4 border-b pb-2">
+                    <h2 class="text-xl font-semibold">Schadeposten</h2>
+                    <button id="add-schadepost" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary hover:bg-primary-dark">Nieuwe Hoofdpost</button>
+                </div>
+                <div id="schadeposten-lijst" class="space-y-6"></div>
+            </section>
+        </main>
+
+        <aside class="w-full lg:w-1/3 bg-sidebar p-4 sm:p-6 lg:p-8 border-l border-gray-200">
+            <div class="sticky top-8 space-y-6">
+                <section id="dossier-info" class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4 border-b pb-2">Algemene Gegevens</h2>
+                    <div class="space-y-4">
+                        <div><label for="dossiernummer" class="block text-sm font-medium text-gray-700">Dossiernummer Van Dort</label><input type="text" id="dossiernummer" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm"></div>
+                        <div><label for="contactpersoon" class="block text-sm font-medium text-gray-700">Contactpersoon intern</label><input type="text" id="contactpersoon" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm"></div>
+                        <div><label for="benadeelde" class="block text-sm font-medium text-gray-700">Cliënt (benadeelde)</label><input type="text" id="benadeelde" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm"></div>
+                        <div><label for="geboortedatum" class="block text-sm font-medium text-gray-700">Geboortedatum</label><input type="date" id="geboortedatum" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm"></div>
+                        <div><label for="schadedatum" class="block text-sm font-medium text-gray-700">Schadedatum</label><input type="date" id="schadedatum" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm"></div>
+                    </div>
+                </section>
+                
+                <section id="wederpartij-info" class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4 border-b pb-2">Gegevens Wederpartij</h2>
+                    <div class="space-y-4">
+                        <div><label for="wederpartij-verzekeraar" class="block text-sm font-medium text-gray-700">Verzekeraar</label><input type="text" id="wederpartij-verzekeraar" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm"></div>
+                        <div><label for="wederpartij-contactpersoon" class="block text-sm font-medium text-gray-700">Contactpersoon</label><input type="text" id="wederpartij-contactpersoon" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm"></div>
+                        <div><label for="wederpartij-schadenummer" class="block text-sm font-medium text-gray-700">Schadenummer</label><input type="text" id="wederpartij-schadenummer" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm"></div>
+                    </div>
+                </section>
+
+                <!-- Rente Instellingen -->
+                <section class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4 border-b pb-2">Rente Instellingen</h2>
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center">
+                            <label for="rente-percentage" class="font-medium text-sm">Wettelijke rente %:</label>
+                            <div class="relative w-24">
+                                <input type="number" id="rente-percentage" value="2.75" min="0" max="20" step="0.25" class="block w-full rounded-md border-gray-300 shadow-sm text-right pr-7 sm:text-sm">
+                                <div class="pointer-events-none absolute inset-y-0 right-0 pr-2 flex items-center"><span class="text-sm">%</span></div>
+                            </div>
+                        </div>
+                        <button id="herbereken-rente" class="w-full bg-accent text-white px-4 py-2 rounded-md font-medium hover:bg-opacity-90">Herbereken Automatische Rente</button>
+                    </div>
+                </section>
+
+                <section class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4 border-b pb-2">Totaaloverzicht</h2>
+                    <div class="space-y-3 text-sm">
+                        <div class="flex justify-between items-center"><span class="font-medium">Totaal schadeposten:</span><span id="totaal-schade" class="font-semibold text-base">€ 0,00</span></div>
+                        <div class="flex justify-between items-center">
+                            <label for="wettelijke-rente" class="font-medium">Wettelijke Rente (auto):</label>
+                            <div class="relative w-32">
+                                <div class="pointer-events-none absolute inset-y-0 left-0 pl-2 flex items-center"><span class="text-gray-500">€</span></div>
+                                <input type="number" id="wettelijke-rente" value="0" min="0" step="0.01" class="block w-full rounded-md border-gray-300 pl-7 text-right shadow-sm sm:text-sm bg-gray-100" readonly placeholder="0.00">
+                            </div>
+                        </div>
+                        <div class="flex justify-between items-center"><label for="bgk" class="font-medium">Buitengerechtelijke Kosten (BGK):</label><div class="relative w-32"><div class="pointer-events-none absolute inset-y-0 left-0 pl-2 flex items-center"><span class="text-gray-500">€</span></div><input type="number" id="bgk" value="0" min="0" step="0.01" class="block w-full rounded-md border-gray-300 pl-7 text-right shadow-sm sm:text-sm" placeholder="0.00"></div></div>
+                        <div class="flex justify-between items-center border-t pt-2"><span class="font-medium">Vordering (excl. aanspr.):</span><span id="vordering-bruto" class="font-semibold text-base">€ 0,00</span></div>
+                        <div class="flex justify-between items-center"><label for="aansprakelijkheid" class="font-medium">Aansprakelijkheid:</label><div class="relative w-24"><input type="number" id="aansprakelijkheid" value="100" min="0" max="100" class="block w-full rounded-md border-gray-300 shadow-sm text-right pr-7 sm:text-sm"><div class="pointer-events-none absolute inset-y-0 right-0 pr-2 flex items-center"><span>%</span></div></div></div>
+                        <div class="flex justify-between items-center border-t pt-2"><span class="font-medium">Vordering (incl. aanspr.):</span><span id="vordering-netto" class="font-semibold text-base">€ 0,00</span></div>
+                        <div class="flex justify-between items-center"><label for="verrichte-betalingen" class="font-medium">Reeds betaald:</label><div class="relative w-32"><div class="pointer-events-none absolute inset-y-0 left-0 pl-2 flex items-center"><span class="text-gray-500">€</span></div><input type="number" id="verrichte-betalingen" value="0" min="0" step="0.01" class="block w-full rounded-md border-gray-300 pl-7 text-right shadow-sm sm:text-sm" placeholder="0.00"></div></div>
+                        <div class="flex justify-between items-center bg-subtle p-3 rounded-lg border-t-4 border-primary mt-2"><span class="font-bold text-lg">Openstaand Saldo:</span><span id="saldo" class="font-bold text-2xl text-primary">€ 0,00</span></div>
+                    </div>
+                    <footer class="mt-6 pt-6 border-t">
+                        <div class="flex flex-wrap justify-center gap-3">
+                             <button id="save-data" class="bg-primary text-white px-4 py-2 rounded-md font-semibold hover:bg-primary-dark shadow-sm transition-colors duration-300">Opslaan</button>
+                             <button id="load-data" class="bg-gray-600 text-white px-4 py-2 rounded-md font-semibold hover:bg-gray-700 shadow-sm">Laden</button>
+                             <button id="export-excel" class="bg-green-600 text-white px-4 py-2 rounded-md font-semibold hover:bg-green-700 shadow-sm">Excel Export</button>
+                             <button id="print-export" class="bg-gray-600 text-white px-4 py-2 rounded-md font-semibold hover:bg-gray-700 shadow-sm">Printen</button>
+                        </div>
+                        <input type="file" id="file-loader" accept=".json" style="display: none;">
+                        <p class="mt-4 text-center text-xs text-gray-500">Schadestaat onder voorbehoud van alle rechten en weren.</p>
+                    </footer>
+                </section>
+            </div>
+        </aside>
+    </div>
+
+    <div id="print-output" class="print-only p-8"></div>
+    
+    <div id="print-modal" class="modal-overlay hidden">
+        <div class="modal-content shadow-xl">
+            <h3 class="text-lg font-medium mb-4">Kies een print-indeling</h3>
+            <div class="space-y-2 mb-4 text-sm text-gray-600">
+                <p><strong>Kort Overzicht:</strong> Toont alle posten (inclusief lege posten)</p>
+                <p><strong>Volledig Overzicht:</strong> Verbergt automatisch lege posten</p>
+            </div>
+            <div class="flex gap-4 justify-center">
+                <button id="print-kort" class="bg-primary text-white px-6 py-2 rounded-md">Kort Overzicht</button>
+                <button id="print-volledig" class="bg-gray-600 text-white px-6 py-2 rounded-md">Volledig Overzicht</button>
+            </div>
+            <button id="print-cancel" class="mt-4 text-sm text-gray-500">Annuleren</button>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const schadepostenLijst = document.getElementById('schadeposten-lijst');
+        let validationTimer = null;
+
+        new Sortable(schadepostenLijst, { animation: 150, handle: '.drag-handle', ghostClass: 'sortable-ghost' });
+
+        const defaultSchadeposten = ["Voorschot smartengeld", "Zaakbeschadiging/zaakschade", "Medische kosten", "Reiskosten", "Huishoudelijke hulp", "Verlies aan verdienvermogen", "Daggeldvergoeding/verzorging", "Porto- en telefoonkosten", "Zelfwerkzaamheid", "Studie", "Overige kosten"];
+        defaultSchadeposten.forEach(titel => createSchadepost(titel));
+        
+        document.getElementById('add-schadepost').addEventListener('click', () => createSchadepost(prompt("Naam van de nieuwe hoofdpost:", "")));
+        
+        // Event listeners voor validatie en berekeningen
+        ['bgk', 'aansprakelijkheid', 'verrichte-betalingen', 'geboortedatum', 'schadedatum', 'rente-percentage'].forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.addEventListener('input', () => {
+                    if (id === 'rente-percentage') berekenAutomatischeRente();
+                    berekenTotalen();
+                    scheduleValidation();
+                });
+            }
+        });
+
+        document.getElementById('herbereken-rente').addEventListener('click', berekenAutomatischeRente);
+
+        function createSchadepost(titel, subRegelsData = []) {
+            if (!titel) return;
+            const postContainer = document.createElement('div');
+            postContainer.className = 'schadepost-hoofd p-4 bg-white rounded-md shadow';
+            postContainer.innerHTML = `
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+                    <div class="flex items-center gap-3 flex-grow"><span class="drag-handle text-gray-400 hover:text-gray-700"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle><circle cx="5" cy="5" r="1"></circle><circle cx="5" cy="12" r="1"></circle><circle cx="5" cy="19" r="1"></circle><circle cx="19" cy="5" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="19" cy="19" r="1"></circle></svg></span><input type="text" value="${titel}" class="omschrijving-hoofd text-lg font-semibold border-none p-0 focus:ring-0 flex-grow"></div>
+                    <div class="flex items-center gap-4 flex-shrink-0"><span class="subtotaal-display font-bold text-primary">€ 0,00</span><button class="add-sub-regel-btn text-sm bg-accent text-white px-3 py-1 rounded-md hover:bg-opacity-90">Regel +</button><button class="remove-hoofdpost-btn text-gray-400 hover:text-red-600 text-xl">&times;</button></div>
+                </div>
+                <div class="sub-regels-container space-y-3"></div>`;
+            schadepostenLijst.appendChild(postContainer);
+
+            const subRegelsContainer = postContainer.querySelector('.sub-regels-container');
+            if (subRegelsData.length > 0) {
+                subRegelsData.forEach(data => createSubRegel(subRegelsContainer, data));
+            }
+            postContainer.querySelector('.add-sub-regel-btn').addEventListener('click', () => createSubRegel(subRegelsContainer));
+            postContainer.querySelector('.remove-hoofdpost-btn').addEventListener('click', () => {
+                if (confirm(`Weet u zeker dat u de hoofdpost "${titel}" en alle bijbehorende regels wilt verwijderen?`)) {
+                    postContainer.remove();
+                    berekenTotalen();
+                    scheduleValidation();
+                }
+            });
+            berekenTotalen();
+        }
+
+        function createSubRegel(container, data = {}) {
+            const subRegelDiv = document.createElement('div');
+            subRegelDiv.className = 'sub-regel p-3 rounded-md';
+            subRegelDiv.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-x-4 gap-y-2">
+                    <div class="md:col-span-3"><label class="text-xs font-medium text-gray-600 block">Datum</label><input type="date" class="datum w-full mt-1 sm:text-sm rounded-md border-gray-300 shadow-sm" value="${data.datum || ''}"></div>
+                    <div class="md:col-span-5"><label class="text-xs font-medium text-gray-600 block">Bewijsstuk(ken)</label><input type="text" class="bewijsstuk w-full mt-1 sm:text-sm rounded-md border-gray-300 shadow-sm" placeholder="bv. Factuur Fysio" value="${data.bewijsstuk || ''}"></div>
+                    <div class="md:col-span-4 flex items-end gap-2">
+                        <div class="flex-grow"><label class="text-xs font-medium text-gray-600 block">Totaal incl.</label><input type="number" class="bedrag-totaal w-full mt-1 sm:text-sm rounded-md border-gray-300 shadow-sm text-right" step="0.01" placeholder="0.00" value="${data.totaal || ''}"></div>
+                        <button class="bereken-btw-btn p-1 bg-gray-200 rounded-md hover:bg-gray-300" title="Bereken Netto en BTW (21%) vanuit dit totaalbedrag">↵</button>
+                    </div>
+                    <div class="md:col-span-10 grid grid-cols-1 md:grid-cols-10 gap-x-4">
+                        <div class="md:col-span-5"><label class="text-xs font-medium text-gray-600 block">Toelichting</label><textarea class="toelichting w-full mt-1 sm:text-sm rounded-md border-gray-300 shadow-sm" rows="1">${data.toelichting || ''}</textarea></div>
+                        <div class="md:col-span-3"><label class="text-xs font-medium text-gray-600 block">Netto (auto)</label><input type="number" class="bedrag-netto w-full mt-1 sm:text-sm rounded-md border-gray-300 shadow-sm text-right bg-gray-100" step="0.01" readonly value="${data.netto || ''}"></div>
+                        <div class="md:col-span-2"><label class="text-xs font-medium text-gray-600 block">BTW (auto)</label><input type="number" class="bedrag-btw w-full mt-1 sm:text-sm rounded-md border-gray-300 shadow-sm text-right bg-gray-100" step="0.01" readonly value="${data.btw || ''}"></div>
+                    </div>
+                    <div class="md:col-span-2 flex flex-col justify-between items-end pt-1">
+                        <div class="flex items-center space-x-2 mt-1"><label class="text-xs font-medium text-gray-600">Wett. Rente?</label><input type="checkbox" class="rente-check sm:text-sm rounded border-gray-300" ${data.rente ? 'checked' : ''}></div>
+                        <button class="remove-sub-regel-btn text-gray-400 hover:text-red-500 text-xs mt-2">Verwijder</button>
+                    </div>
+                </div>`;
+            container.appendChild(subRegelDiv);
+
+            const totaalInput = subRegelDiv.querySelector('.bedrag-totaal');
+            const nettoInput = subRegelDiv.querySelector('.bedrag-netto');
+            const btwInput = subRegelDiv.querySelector('.bedrag-btw');
+
+            subRegelDiv.querySelector('.bereken-btw-btn').addEventListener('click', () => {
+                const totaal = parseFloat(totaalInput.value) || 0;
+                if (totaal > 0) {
+                    const netto = totaal / 1.21;
+                    nettoInput.value = netto.toFixed(2);
+                    btwInput.value = (totaal - netto).toFixed(2);
+                    berekenTotalen();
+                }
+            });
+            
+            // Event listeners
+            totaalInput.addEventListener('input', () => {
+                berekenTotalen();
+                berekenAutomatischeRente();
+                scheduleValidation();
+            });
+            
+            subRegelDiv.querySelectorAll('textarea, .bewijsstuk, .datum').forEach(el => 
+                el.addEventListener('input', scheduleValidation)
+            );
+
+            subRegelDiv.querySelector('.rente-check').addEventListener('change', () => {
+                berekenAutomatischeRente();
+                berekenTotalen();
+            });
+            
+            subRegelDiv.querySelector('.remove-sub-regel-btn').addEventListener('click', () => {
+                subRegelDiv.remove();
+                berekenTotalen();
+                berekenAutomatischeRente();
+                scheduleValidation();
+            });
+        }
+
+        function berekenAutomatischeRente() {
+            const schadedatum = document.getElementById('schadedatum').value;
+            const rentePercentage = parseFloat(document.getElementById('rente-percentage').value) || 2.75;
+            
+            if (!schadedatum) {
+                document.getElementById('wettelijke-rente').value = '0.00';
+                return;
+            }
+
+            let totaleRente = 0;
+            const schadeDatum = new Date(schadedatum);
+            const vandaag = new Date();
+
+            // Bereken jaren tussen schadedatum en vandaag
+            const tijdverschilMs = vandaag - schadeDatum;
+            const jaren = tijdverschilMs / (1000 * 60 * 60 * 24 * 365.25);
+
+            document.querySelectorAll('.rente-check:checked').forEach(checkbox => {
+                const regel = checkbox.closest('.sub-regel');
+                const bedrag = parseFloat(regel.querySelector('.bedrag-totaal').value) || 0;
+                if (bedrag > 0) {
+                    totaleRente += bedrag * (rentePercentage / 100) * Math.max(0, jaren);
+                }
+            });
+
+            document.getElementById('wettelijke-rente').value = totaleRente.toFixed(2);
+        }
+        
+        function berekenTotalen() {
+            let totaalSchade = 0;
+            
+            // Bereken per hoofdpost
+            document.querySelectorAll('.schadepost-hoofd').forEach(hoofdpost => {
+                let subtotaal = 0;
+                
+                hoofdpost.querySelectorAll('.sub-regel').forEach(regel => {
+                    const totaal = parseFloat(regel.querySelector('.bedrag-totaal').value) || 0;
+                    subtotaal += totaal;
+                });
+                
+                hoofdpost.querySelector('.subtotaal-display').textContent = formatCurrency(subtotaal);
+                totaalSchade += subtotaal;
+            });
+
+            // Update totalen in sidebar
+            document.getElementById('totaal-schade').textContent = formatCurrency(totaalSchade);
+            
+            const wettelijkeRente = parseFloat(document.getElementById('wettelijke-rente').value) || 0;
+            const bgk = parseFloat(document.getElementById('bgk').value) || 0;
+            const vorderingBruto = totaalSchade + wettelijkeRente + bgk;
+            document.getElementById('vordering-bruto').textContent = formatCurrency(vorderingBruto);
+            
+            const aansprakelijkheid = parseFloat(document.getElementById('aansprakelijkheid').value) || 100;
+            const vorderingNetto = vorderingBruto * (aansprakelijkheid / 100);
+            document.getElementById('vordering-netto').textContent = formatCurrency(vorderingNetto);
+            
+            const verrichteBetalingen = parseFloat(document.getElementById('verrichte-betalingen').value) || 0;
+            const saldo = vorderingNetto - verrichteBetalingen;
+            document.getElementById('saldo').textContent = formatCurrency(saldo);
+        }
+
+        function scheduleValidation() {
+            if (validationTimer) clearTimeout(validationTimer);
+            validationTimer = setTimeout(validateForm, 500);
+        }
+
+        function validateForm() {
+            const validationItems = [];
+            const dashboard = document.getElementById('validation-dashboard');
+            const itemsContainer = document.getElementById('validation-items');
+
+            // Datum validaties
+            const geboortedatum = document.getElementById('geboortedatum').value;
+            const schadedatum = document.getElementById('schadedatum').value;
+            
+            if (geboortedatum && schadedatum) {
+                const geboorte = new Date(geboortedatum);
+                const schade = new Date(schadedatum);
+                
+                if (schade < geboorte) {
+                    validationItems.push({
+                        type: 'error',
+                        message: 'Schadedatum ligt voor geboortedatum',
+                        element: 'schadedatum'
+                    });
+                }
+            }
+
+            if (schadedatum) {
+                const schade = new Date(schadedatum);
+                const vandaag = new Date();
+                const verschilJaren = (vandaag - schade) / (1000 * 60 * 60 * 24 * 365.25);
+
+                if (schade > vandaag) {
+                    validationItems.push({
+                        type: 'warning',
+                        message: 'Schadedatum ligt in de toekomst',
+                        element: 'schadedatum'
+                    });
+                }
+
+                if (verschilJaren > 10) {
+                    validationItems.push({
+                        type: 'info',
+                        message: `Schadedatum is ${Math.floor(verschilJaren)} jaar geleden - controleer verjaring`,
+                        element: 'schadedatum'
+                    });
+                }
+            }
+
+            // Aansprakelijkheid validatie
+            const aansprakelijkheid = parseFloat(document.getElementById('aansprakelijkheid').value) || 100;
+            if (aansprakelijkheid > 100) {
+                validationItems.push({
+                    type: 'warning',
+                    message: 'Aansprakelijkheid is hoger dan 100%',
+                    element: 'aansprakelijkheid'
+                });
+            }
+
+            // Negatief saldo info
+            const saldoText = document.getElementById('saldo').textContent;
+            const saldoValue = parseFloat(saldoText.replace('€ ', '').replace(',', '.'));
+            if (saldoValue < 0) {
+                validationItems.push({
+                    type: 'info',
+                    message: 'Openstaand saldo is negatief (overschot aan betalingen)',
+                    element: null
+                });
+            }
+
+            // Bedrag validaties per regel
+            document.querySelectorAll('.sub-regel').forEach((regel, index) => {
+                const bedrag = parseFloat(regel.querySelector('.bedrag-totaal').value) || 0;
+                const bewijsstuk = regel.querySelector('.bewijsstuk').value.trim();
+                const datum = regel.querySelector('.datum').value;
+                const toelichting = regel.querySelector('.toelichting').value.trim();
+
+                // Ontbrekende bedragen bij ingevulde info
+                if ((bewijsstuk || datum || toelichting) && bedrag === 0) {
+                    validationItems.push({
+                        type: 'warning',
+                        message: `Regel ${index + 1}: Informatie ingevuld maar geen bedrag`,
+                        element: null
+                    });
+                }
+
+                // Hoge bedragen zonder bewijsstuk
+                if (bedrag > 50000 && !bewijsstuk) {
+                    validationItems.push({
+                        type: 'warning',
+                        message: `Regel ${index + 1}: Hoog bedrag (€${bedrag.toFixed(2)}) zonder bewijsstuk`,
+                        element: null
+                    });
+                }
+
+                // Post datum voor schadedatum
+                if (datum && schadedatum) {
+                    const postDatum = new Date(datum);
+                    const schadeDatum = new Date(schadedatum);
+                    if (postDatum < schadeDatum) {
+                        validationItems.push({
+                            type: 'warning',
+                            message: `Regel ${index + 1}: Datum voor schadedatum`,
+                            element: null
+                        });
+                    }
+                }
+            });
+
+            // Update UI
+            if (validationItems.length > 0) {
+                itemsContainer.innerHTML = validationItems.map(item => 
+                    `<div class="validation-item p-2 rounded-md validation-${item.type}">
+                        <span class="font-medium">${item.type === 'error' ? '❌' : item.type === 'warning' ? '⚠️' : 'ℹ️'}</span>
+                        ${item.message}
+                    </div>`
+                ).join('');
+                dashboard.classList.remove('hidden');
+
+                // Highlight problematic elements
+                validationItems.forEach(item => {
+                    if (item.element) {
+                        const element = document.getElementById(item.element);
+                        if (element) {
+                            element.classList.add(item.type === 'error' ? 'border-validation-error' : 'border-validation-warning');
+                            setTimeout(() => {
+                                element.classList.remove('border-validation-error', 'border-validation-warning');
+                            }, 3000);
+                        }
+                    }
+                });
+            } else {
+                dashboard.classList.add('hidden');
+            }
+        }
+
+        function formatCurrency(value) { 
+            return `€ ${value.toFixed(2).replace('.', ',')}`; 
+        }
+        
+        const saveDataBtn = document.getElementById('save-data');
+        const loadDataBtn = document.getElementById('load-data');
+        const printExportBtn = document.getElementById('print-export');
+        const exportExcelBtn = document.getElementById('export-excel');
+        const fileLoaderInput = document.getElementById('file-loader');
+
+        // Save functie
+        saveDataBtn.addEventListener('click', () => {
+            const dossiernummer = document.getElementById('dossiernummer').value;
+            if (!dossiernummer.trim()) {
+                alert('Vul een dossiernummer in. Dit wordt gebruikt voor de bestandsnaam.');
+                return;
+            }
+            const data = {
+                algemeen: { 
+                    dossiernummer: document.getElementById('dossiernummer').value, 
+                    contactpersoon: document.getElementById('contactpersoon').value, 
+                    benadeelde: document.getElementById('benadeelde').value, 
+                    geboortedatum: document.getElementById('geboortedatum').value, 
+                    schadedatum: document.getElementById('schadedatum').value 
+                },
+                wederpartij: { 
+                    verzekeraar: document.getElementById('wederpartij-verzekeraar').value, 
+                    contactpersoon: document.getElementById('wederpartij-contactpersoon').value, 
+                    schadenummer: document.getElementById('wederpartij-schadenummer').value 
+                },
+                instellingen: {
+                    rentePercentage: document.getElementById('rente-percentage').value
+                },
+                totalen: { 
+                    wettelijkeRente: document.getElementById('wettelijke-rente').value, 
+                    bgk: document.getElementById('bgk').value, 
+                    aansprakelijkheid: document.getElementById('aansprakelijkheid').value, 
+                    verrichteBetalingen: document.getElementById('verrichte-betalingen').value 
+                },
+                schadeposten: Array.from(document.querySelectorAll('.schadepost-hoofd')).map(hoofdpost => ({
+                    titel: hoofdpost.querySelector('.omschrijving-hoofd').value,
+                    subRegels: Array.from(hoofdpost.querySelectorAll('.sub-regel')).map(regel => ({
+                        datum: regel.querySelector('.datum').value, 
+                        bewijsstuk: regel.querySelector('.bewijsstuk').value,
+                        totaal: regel.querySelector('.bedrag-totaal').value,
+                        netto: regel.querySelector('.bedrag-netto').value, 
+                        btw: regel.querySelector('.bedrag-btw').value,
+                        toelichting: regel.querySelector('.toelichting').value, 
+                        rente: regel.querySelector('.rente-check').checked
+                    }))
+                }))
+            };
+
+            const dataStr = JSON.stringify(data, null, 2);
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(new Blob([dataStr], {type: 'application/json'}));
+            link.download = `schadestaat-${dossiernummer}.json`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+
+            // Visuele feedback
+            saveDataBtn.textContent = 'Opgeslagen ✔';
+            saveDataBtn.classList.remove('bg-primary');
+            saveDataBtn.classList.add('bg-green-600');
+            setTimeout(() => {
+                saveDataBtn.textContent = 'Opslaan';
+                saveDataBtn.classList.remove('bg-green-600');
+                saveDataBtn.classList.add('bg-primary');
+            }, 2500);
+        });
+
+        loadDataBtn.addEventListener('click', () => fileLoaderInput.click());
+        fileLoaderInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    applyDataToForm(JSON.parse(e.target.result));
+                } catch (error) {
+                    alert('Fout bij het lezen van het bestand: ' + error.message);
+                    console.error('Load error:', error);
+                }
+            };
+            reader.readAsText(file);
+            fileLoaderInput.value = '';
+        });
+
+        // Load functie
+        function applyDataToForm(data) {
+            // Laad algemene gegevens
+            if (data.algemeen) {
+                Object.keys(data.algemeen).forEach(key => { 
+                    const element = document.getElementById(key);
+                    if (element) element.value = data.algemeen[key] || ''; 
+                });
+            }
+            
+            // Laad wederpartij gegevens
+            if (data.wederpartij) {
+                Object.keys(data.wederpartij).forEach(key => { 
+                    const element = document.getElementById(`wederpartij-${key}`);
+                    if (element) element.value = data.wederpartij[key] || ''; 
+                });
+            }
+
+            // Laad instellingen
+            if (data.instellingen) {
+                if (data.instellingen.rentePercentage) {
+                    document.getElementById('rente-percentage').value = data.instellingen.rentePercentage;
+                }
+            }
+            
+            // Laad totalen
+            if (data.totalen) {
+                Object.keys(data.totalen).forEach(key => { 
+                    const elementId = key.replace('verrichteBetalingen', 'verrichte-betalingen')
+                                        .replace('wettelijkeRente', 'wettelijke-rente');
+                    const element = document.getElementById(elementId);
+                    if (element) element.value = data.totalen[key] || '';
+                });
+            }
+            
+            // Verwijder bestaande schadeposten en laad nieuwe
+            schadepostenLijst.innerHTML = '';
+            if (data.schadeposten) {
+                data.schadeposten.forEach(post => createSchadepost(post.titel, post.subRegels));
+            }
+            
+            berekenAutomatischeRente();
+            berekenTotalen();
+            scheduleValidation();
+            alert(`Dossier ${data.algemeen?.dossiernummer || 'onbekend'} succesvol geladen!`);
+        }
+
+        // Excel Export functie
+        exportExcelBtn.addEventListener('click', () => {
+            const dossiernummer = document.getElementById('dossiernummer').value || 'Schadestaat';
+            
+            // Verzamel data
+            const algemeneData = [
+                ['Dossiernummer', document.getElementById('dossiernummer').value || 'N.v.t.'],
+                ['Cliënt', document.getElementById('benadeelde').value || 'N.v.t.'],
+                ['Schadedatum', document.getElementById('schadedatum').value || 'N.v.t.'],
+                ['Verzekeraar', document.getElementById('wederpartij-verzekeraar').value || 'N.v.t.'],
+                ['Schadenummer', document.getElementById('wederpartij-schadenummer').value || 'N.v.t.'],
+                [''], // Lege regel
+            ];
+
+            const detailData = [
+                ['Hoofdpost', 'Datum', 'Bewijsstuk', 'Bedrag', 'Netto', 'BTW', 'Wett. Rente', 'Toelichting']
+            ];
+
+            document.querySelectorAll('.schadepost-hoofd').forEach(hoofdpost => {
+                const titel = hoofdpost.querySelector('.omschrijving-hoofd').value;
+                const regels = hoofdpost.querySelectorAll('.sub-regel');
+                
+                if (regels.length === 0) {
+                    detailData.push([titel, '', '', 0, 0, 0, 'Nee', '']);
+                } else {
+                    regels.forEach((regel, index) => {
+                        detailData.push([
+                            index === 0 ? titel : '',
+                            regel.querySelector('.datum').value || '',
+                            regel.querySelector('.bewijsstuk').value || '',
+                            parseFloat(regel.querySelector('.bedrag-totaal').value) || 0,
+                            parseFloat(regel.querySelector('.bedrag-netto').value) || 0,
+                            parseFloat(regel.querySelector('.bedrag-btw').value) || 0,
+                            regel.querySelector('.rente-check').checked ? 'Ja' : 'Nee',
+                            regel.querySelector('.toelichting').value || ''
+                        ]);
+                    });
+                }
+            });
+
+            const totaalData = [
+                [''], // Lege regel
+                ['Totaaloverzicht', ''],
+                ['Totaal schadeposten', document.getElementById('totaal-schade').textContent],
+                ['Wettelijke rente', formatCurrency(parseFloat(document.getElementById('wettelijke-rente').value) || 0)],
+                ['BGK', formatCurrency(parseFloat(document.getElementById('bgk').value) || 0)],
+                ['Vordering (excl. aansprakelijkheid)', document.getElementById('vordering-bruto').textContent],
+                ['Aansprakelijkheid', document.getElementById('aansprakelijkheid').value + '%'],
+                ['Vordering (incl. aansprakelijkheid)', document.getElementById('vordering-netto').textContent],
+                ['Reeds betaald', formatCurrency(parseFloat(document.getElementById('verrichte-betalingen').value) || 0)],
+                ['Openstaand saldo', document.getElementById('saldo').textContent]
+            ];
+
+            // Combineer alle data
+            const allData = [...algemeneData, ...detailData, ...totaalData];
+
+            // Maak workbook
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(allData);
+
+            // Pas kolombreedte aan
+            ws['!cols'] = [
+                {wch: 20}, {wch: 12}, {wch: 30}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 50}
+            ];
+
+            XLSX.utils.book_append_sheet(wb, ws, "Schadestaat");
+            XLSX.writeFile(wb, `${dossiernummer}-schadestaat.xlsx`);
+
+            // Visuele feedback
+            exportExcelBtn.textContent = 'Geëxporteerd ✔';
+            exportExcelBtn.classList.remove('bg-green-600');
+            exportExcelBtn.classList.add('bg-green-800');
+            setTimeout(() => {
+                exportExcelBtn.textContent = 'Excel Export';
+                exportExcelBtn.classList.remove('bg-green-800');
+                exportExcelBtn.classList.add('bg-green-600');
+            }, 2500);
+        });
+
+        // Print Logica
+        const printModal = document.getElementById('print-modal');
+        printExportBtn.addEventListener('click', () => printModal.classList.remove('hidden'));
+        document.getElementById('print-cancel').addEventListener('click', () => printModal.classList.add('hidden'));
+        document.getElementById('print-kort').addEventListener('click', () => { generatePrintHTML('kort'); printModal.classList.add('hidden'); });
+        document.getElementById('print-volledig').addEventListener('click', () => { generatePrintHTML('volledig'); printModal.classList.add('hidden'); });
+
+        function generatePrintHTML(printType) {
+            // Voor kort overzicht: toon alle posten
+            // Voor volledig overzicht: verberg lege posten automatisch
+            const verbergLeeg = printType === 'volledig';
+            
+            // Verzamel data
+            const algemeen = { 
+                dossiernummer: document.getElementById('dossiernummer').value || 'N.v.t.', 
+                benadeelde: document.getElementById('benadeelde').value || 'N.v.t.', 
+                contactpersoon: document.getElementById('contactpersoon').value || 'N.v.t.', 
+                geboortedatum: document.getElementById('geboortedatum').value || 'N.v.t.', 
+                schadedatum: document.getElementById('schadedatum').value || 'N.v.t.' 
+            };
+            
+            const wederpartij = { 
+                verzekeraar: document.getElementById('wederpartij-verzekeraar').value || 'N.v.t.', 
+                contactpersoon: document.getElementById('wederpartij-contactpersoon').value || 'N.v.t.', 
+                schadenummer: document.getElementById('wederpartij-schadenummer').value || 'N.v.t.' 
+            };
+
+            let samenvattingHTML = '';
+            let totaalAantalRegels = 0;
+            document.querySelectorAll('.schadepost-hoofd').forEach(hoofdpost => {
+                const aantalRegels = hoofdpost.querySelectorAll('.sub-regel').length;
+                const subtotaal = hoofdpost.querySelector('.subtotaal-display').textContent;
+                
+                // Voor kort overzicht: toon alles, voor volledig: verberg lege
+                if(verbergLeeg && aantalRegels === 0) return;
+                
+                samenvattingHTML += `<tr><td>${hoofdpost.querySelector('.omschrijving-hoofd').value}</td><td>${aantalRegels}</td><td class="text-right">${subtotaal}</td></tr>`;
+                totaalAantalRegels += aantalRegels;
+            });
+            
+            let specificatieHTML = '';
+            if (printType === 'volledig') {
+                document.querySelectorAll('.schadepost-hoofd').forEach(hoofdpost => {
+                    const aantalRegels = hoofdpost.querySelectorAll('.sub-regel').length;
+                    if(verbergLeeg && aantalRegels === 0) return;
+
+                    specificatieHTML += `<tr class="print-hoofd-regel"><td colspan="5"><strong>${hoofdpost.querySelector('.omschrijving-hoofd').value}</strong></td><td class="text-right"><strong>${hoofdpost.querySelector('.subtotaal-display').textContent}</strong></td></tr>`;
+                    hoofdpost.querySelectorAll('.sub-regel').forEach(regel => {
+                        const totaal = parseFloat(regel.querySelector('.bedrag-totaal').value) || 0;
+                        const netto = parseFloat(regel.querySelector('.bedrag-netto').value) || 0;
+                        const btw = parseFloat(regel.querySelector('.bedrag-btw').value) || 0;
+                        const toelichting = regel.querySelector('.toelichting').value;
+                        
+                        specificatieHTML += `<tr class="print-sub-regel"><td>${regel.querySelector('.datum').value || '-'}</td><td colspan="2">${regel.querySelector('.bewijsstuk').value || '-'}</td><td class="text-right">${formatCurrency(netto)}</td><td class="text-right">${formatCurrency(btw)}</td><td class="text-right">${formatCurrency(totaal)}</td></tr>`;
+                        if (toelichting) {
+                            specificatieHTML += `<tr class="print-toelichting-rij"><td colspan="6"><em>Toelichting: ${toelichting}</em></td></tr>`;
+                        }
+                    });
+                });
+            }
+
+            const totalen = {
+                totaalSchade: document.getElementById('totaal-schade').textContent, 
+                wettelijkeRente: formatCurrency(parseFloat(document.getElementById('wettelijke-rente').value) || 0),
+                bgk: formatCurrency(parseFloat(document.getElementById('bgk').value) || 0), 
+                vorderingBruto: document.getElementById('vordering-bruto').textContent,
+                aansprakelijkheid: document.getElementById('aansprakelijkheid').value + '%', 
+                vorderingNetto: document.getElementById('vordering-netto').textContent,
+                verrichteBetalingen: formatCurrency(parseFloat(document.getElementById('verrichte-betalingen').value) || 0), 
+                saldo: document.getElementById('saldo').textContent
+            };
+            
+            let totaalOverzichtHTML = (printType === 'volledig') ? `
+                <tr><td style="width: 50%;">Totaal van de schadeposten</td><td>${totalen.totaalSchade}</td></tr>
+                <tr><td>Totaal Wettelijke Rente (automatisch berekend)</td><td>${totalen.wettelijkeRente}</td></tr>
+                <tr><td>Buitengerechtelijke Kosten (BGK)</td><td>${totalen.bgk}</td></tr>
+                <tr style="font-weight: bold;"><td>Totale vordering (excl. aansprakelijkheid)</td><td>${totalen.vorderingBruto}</td></tr>
+                <tr><td>Aansprakelijkheid</td><td>${totalen.aansprakelijkheid}</td></tr>
+                <tr style="font-weight: bold;"><td>Vordering (incl. aansprakelijkheid)</td><td>${totalen.vorderingNetto}</td></tr>
+                <tr><td>Totaal van de verrichte betalingen</td><td>${totalen.verrichteBetalingen}</td></tr>
+            ` : '';
+            totaalOverzichtHTML += `<tr style="font-weight: bold; font-size: 1.2em;"><td>Openstaand Saldo</td><td>${totalen.saldo}</td></tr>`;
+
+            document.getElementById('print-output').innerHTML = `
+                <h1>Schadestaat</h1><p>Van Dort Letselschade</p>
+                <h2>Algemene Gegevens</h2><table><tr><td style="width: 30%;">Dossiernummer</td><td>${algemeen.dossiernummer}</td></tr><tr><td>Cliënt (benadeelde)</td><td>${algemeen.benadeelde}</td></tr><tr><td>Schadedatum</td><td>${algemeen.schadedatum}</td></tr></table>
+                <h2>Gegevens Wederpartij</h2><table><tr><td style="width: 30%;">Verzekeraar</td><td>${wederpartij.verzekeraar}</td></tr><tr><td>Schadenummer</td><td>${wederpartij.schadenummer}</td></tr></table>
+                <h2>Samenvatting Schadeposten</h2><table style="width: 100%;"><thead><tr><th style="width: 70%;">Schadepost</th><th style="width: 15%;">Aantal Regels</th><th style="width: 15%;" class="text-right">Subtotaal</th></tr></thead><tbody>${samenvattingHTML}<tr><td><strong>Totaal</strong></td><td><strong>${totaalAantalRegels}</strong></td><td class="text-right"><strong>${totalen.totaalSchade}</strong></td></tr></tbody></table>
+                ${printType === 'volledig' ? `<h2>Specificatie Schadeposten</h2><table style="table-layout: fixed; width: 100%;"><thead><tr><th style="width: 12%;">Datum</th><th style="width: 28%;" colspan="2">Bewijsstuk</th><th style="width: 15%;" class="text-right">Netto</th><th style="width: 15%;" class="text-right">BTW</th><th style="width: 15%;" class="text-right">Totaal</th></tr></thead><tbody>${specificatieHTML}</tbody></table>` : ''}
+                <h2>Totaaloverzicht</h2><table><tbody>${totaalOverzichtHTML}</tbody></table>
+                <footer style="margin-top: 2rem; text-align: center; font-size: 0.8em; color: #555;"><p>Schadestaat is onder voorbehoud van alle rechten en weren van claimant opgemaakt.</p><p>Wettelijke rente automatisch berekend vanaf schadedatum (${document.getElementById('rente-percentage').value}% per jaar)</p></footer>`;
+            window.print();
+        }
+
+        // Initiële berekeningen
+        berekenTotalen();
+        scheduleValidation();
+    });
+    </script>
+</body>
+</html>
